@@ -1,5 +1,5 @@
 // Carte service worker — เปลี่ยนเลขเวอร์ชันทุกครั้งที่อัป index.html ใหม่
-const CACHE = 'carte-v4';
+const CACHE = 'carte-v7';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
