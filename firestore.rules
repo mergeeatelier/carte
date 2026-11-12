@@ -1,0 +1,31 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===== MPLB (เดิม) =====
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // ===== Carte =====
+    function cEmail() { return request.auth.token.email.lower(); }
+    function cSignedIn() { return request.auth != null && request.auth.token.email_verified == true; }
+    function cMe() { return get(/databases/$(database)/documents/carteUsers/$(cEmail())).data; }
+    function cAllowed() { return cSignedIn() && exists(/databases/$(database)/documents/carteUsers/$(cEmail())) && cMe().active == true; }
+    function cAdmin() { return cAllowed() && cMe().role == 'admin'; }
+
+    match /carteUsers/{em} {
+      allow read: if cSignedIn() && (em == cEmail() || cAdmin());
+      allow create: if cAdmin()
+        || (cSignedIn() && em == cEmail() && em == 'mergee.atelier@gmail.com' && request.resource.data.role == 'admin');
+      allow update: if cAdmin()
+        || (cAllowed() && em == cEmail() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seen', 'name']));
+      allow delete: if cAdmin() && em != cEmail();
+    }
+
+    match /carteData/{uid} {
+      allow read, write: if cAllowed() && request.auth.uid == uid;
+    }
+    // ===== /Carte =====
+  }
+}
