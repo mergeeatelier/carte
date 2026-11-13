@@ -7,17 +7,25 @@ service cloud.firestore {
       allow read, write: if request.auth != null && request.auth.uid == uid;
     }
 
-    // ===== Carte =====
+    // ===== Carte (2.0 · มีระบบองค์กร) =====
     function cEmail() { return request.auth.token.email.lower(); }
     function cSignedIn() { return request.auth != null && request.auth.token.email_verified == true; }
     function cMe() { return get(/databases/$(database)/documents/carteUsers/$(cEmail())).data; }
     function cAllowed() { return cSignedIn() && exists(/databases/$(database)/documents/carteUsers/$(cEmail())) && cMe().active == true; }
     function cAdmin() { return cAllowed() && cMe().role == 'admin'; }
 
+    function cMemPath() { return /databases/$(database)/documents/carteMembers/$(cEmail()); }
+    function cIsMem() { return cAllowed() && exists(cMemPath()); }
+    function cMem() { return get(cMemPath()).data; }
+    function cInOrg(org) { return cIsMem() && cMem().org == org; }
+    function cHead(org) { return cAdmin() || (cInOrg(org) && cMem().role == 'head'); }
+    function cHeadAny() { return cIsMem() && cMem().role == 'head'; }
+
     match /carteUsers/{em} {
       allow read: if cSignedIn() && (em == cEmail() || cAdmin());
       allow create: if cAdmin()
-        || (cSignedIn() && em == cEmail() && em == 'mergee.atelier@gmail.com' && request.resource.data.role == 'admin');
+        || (cSignedIn() && em == cEmail() && em == 'mergee.atelier@gmail.com' && request.resource.data.role == 'admin')
+        || (cHeadAny() && request.resource.data.role == 'user' && request.resource.data.active == true);
       allow update: if cAdmin()
         || (cAllowed() && em == cEmail() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seen', 'name']));
       allow delete: if cAdmin() && em != cEmail();
@@ -25,6 +33,52 @@ service cloud.firestore {
 
     match /carteData/{uid} {
       allow read, write: if cAllowed() && request.auth.uid == uid;
+    }
+
+    // สมาชิกองค์กร: 1 อีเมล = 1 องค์กร
+    match /carteMembers/{em} {
+      allow read: if cSignedIn() && (em == cEmail() || cAdmin() || (cHeadAny() && resource.data.org == cMem().org));
+      allow create: if cAdmin()
+        || (cHeadAny() && request.resource.data.org == cMem().org && request.resource.data.role == 'staff');
+      allow update: if cAdmin()
+        || (cHeadAny() && resource.data.org == cMem().org && resource.data.role == 'staff'
+            && request.resource.data.org == resource.data.org && request.resource.data.role == 'staff')
+        || (cSignedIn() && em == cEmail() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['ack']));
+      allow delete: if cAdmin() || (cHeadAny() && resource.data.org == cMem().org && resource.data.role == 'staff');
+    }
+
+    match /carteOrgs/{org} {
+      allow read: if cInOrg(org) || cAdmin();
+      allow create, delete: if cAdmin();
+      allow update: if cHead(org);
+
+      match /staff/{sid} {
+        allow read: if cHead(org) || (cInOrg(org) && cMem().wallet == sid);
+        allow write: if cHead(org);
+      }
+      match /cards/{cid} {
+        allow read: if cHead(org) || (cInOrg(org) && resource.data.owner == cEmail());
+        allow write: if cHead(org);
+      }
+      match /wallets/{wid} {
+        allow read, write: if cHead(org) || (cInOrg(org) && cMem().wallet == wid);
+      }
+      match /shares/{id} {
+        allow read: if cHead(org);
+        allow create: if cInOrg(org) && request.resource.data.by == cEmail();
+      }
+    }
+
+    // หน้าที่คนสแกน QR เห็น (อ่านได้โดยไม่ต้องล็อกอิน)
+    match /cartePublic/{id} {
+      allow read: if true;
+      allow create: if cHead(request.resource.data.org);
+      allow update: if cHead(resource.data.org);
+      allow delete: if cAdmin();
+    }
+    match /cartePublicOrg/{org} {
+      allow read: if true;
+      allow write: if cHead(org);
     }
     // ===== /Carte =====
   }
